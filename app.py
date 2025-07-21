@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import numpy as np
+import certifi
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -12,19 +13,19 @@ class BCRADataFetcher:
 
     def get_exchange_rate(self, currency="USD", days=30):
         url = f"{self.BASE_URL}/estadisticascambiarias/v1.0/Cotizaciones/{currency}?limit={days}"
-        return requests.get(url).json()['results']
+        return requests.get(url, verify=certifi.where()).json()['results']
 
     def get_monetary_data(self, variable_id):
         url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias/{variable_id}"
-        return requests.get(url).json()['results']
+        return requests.get(url, verify=certifi.where()).json()['results']
 
     def get_all_monetary_variables(self):
         url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias"
-        return requests.get(url).json()['results']
+        return requests.get(url, verify=certifi.where()).json()['results']
 
     def get_debtors_data(self, cuit):
         url = f"{self.BASE_URL}/CentralDeDeudores/v1.0/Deudas/{cuit}"
-        return requests.get(url).json().get('results', {})
+        return requests.get(url, verify=certifi.where()).json().get('results', {})
 
 # === SIMPLIFIED ARIMA PREDICTOR ===
 class ExchangeRatePredictor:
@@ -37,20 +38,20 @@ class ExchangeRatePredictor:
     def predict(self, days=7):
         return [self.last_value * (1.005 + 0.01*np.random.randn())**i for i in range(1, days+1)]
 
-# === ALERTS ===
+# === ALERT SYSTEM ===
 class EconomicAlertSystem:
     def check_alerts(self, data):
         alerts = []
         if data['reserves'] < 35000:
             alerts.append("Reservas bajas")
-        if (data['blue_rate'] - data['official_rate'])/data['official_rate'] > 0.15:
+        if (data['blue_rate'] - data['official_rate']) / data['official_rate'] > 0.15:
             alerts.append("Brecha cambiaria crítica")
         for d in data['debtors']:
             if d.get("situacion", 1) >= 4:
                 alerts.append(f"Empresa en situación {d['situacion']}")
         return alerts
 
-# === OPTIMIZADOR DE PORTAFOLIO ===
+# === PORTFOLIO OPTIMIZER ===
 class PortfolioOptimizer:
     def optimize(self, risk_level='medium'):
         presets = {
@@ -60,7 +61,7 @@ class PortfolioOptimizer:
         }
         return presets.get(risk_level, presets['medium'])
 
-# === INSTANCIAS ===
+# === INSTANCES ===
 fetcher = BCRADataFetcher()
 predictor = ExchangeRatePredictor()
 alert_system = EconomicAlertSystem()
@@ -74,7 +75,7 @@ current_data = {
     'alerts': []
 }
 
-# === FLASK ROUTES ===
+# === ROUTES ===
 @app.route("/api/predict/dollar/<int:days>")
 def predict_dollar(days):
     history = fetcher.get_exchange_rate(days=90)
@@ -93,7 +94,7 @@ def get_alerts():
 def get_variables():
     return jsonify(fetcher.get_all_monetary_variables())
 
-# === UPDATE DATA EVERY 30 MIN ===
+# === BACKGROUND DATA REFRESH ===
 def update_data():
     try:
         current_data['official_rate'] = fetcher.get_exchange_rate(days=1)[0]['tipoCotizacion']
