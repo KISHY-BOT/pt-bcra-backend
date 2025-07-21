@@ -13,19 +13,24 @@ class BCRADataFetcher:
 
     def get_exchange_rate(self, currency="USD", days=30):
         url = f"{self.BASE_URL}/estadisticascambiarias/v1.0/Cotizaciones/{currency}?limit={days}"
-        return requests.get(url, verify=certifi.where()).json()['results']
+        print(f"Fetching exchange rate from: {url}")
+        response = requests.get(url, verify=certifi.where())
+        return response.json()['results']
 
     def get_monetary_data(self, variable_id):
         url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias/{variable_id}"
-        return requests.get(url, verify=certifi.where()).json()['results']
+        response = requests.get(url, verify=certifi.where())
+        return response.json()['results']
 
     def get_all_monetary_variables(self):
         url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias"
-        return requests.get(url, verify=certifi.where()).json()['results']
+        response = requests.get(url, verify=certifi.where())
+        return response.json()['results']
 
     def get_debtors_data(self, cuit):
         url = f"{self.BASE_URL}/CentralDeDeudores/v1.0/Deudas/{cuit}"
-        return requests.get(url, verify=certifi.where()).json().get('results', {})
+        response = requests.get(url, verify=certifi.where())
+        return response.json().get('results', {})
 
 # === SIMPLIFIED ARIMA PREDICTOR ===
 class ExchangeRatePredictor:
@@ -34,11 +39,12 @@ class ExchangeRatePredictor:
         df['fecha'] = pd.to_datetime(df['fecha'])
         df.set_index('fecha', inplace=True)
         self.last_value = df['tipoCotizacion'].iloc[-1]
+        print(f"Último valor cotización entrenado: {self.last_value}")
 
     def predict(self, days=7):
-        return [self.last_value * (1.005 + 0.01*np.random.randn())**i for i in range(1, days+1)]
+        return [round(self.last_value * (1.005 + 0.01*np.random.randn())**i, 2) for i in range(1, days+1)]
 
-# === ALERT SYSTEM ===
+# === ALERTAS ===
 class EconomicAlertSystem:
     def check_alerts(self, data):
         alerts = []
@@ -51,7 +57,7 @@ class EconomicAlertSystem:
                 alerts.append(f"Empresa en situación {d['situacion']}")
         return alerts
 
-# === PORTFOLIO OPTIMIZER ===
+# === OPTIMIZADOR DE PORTAFOLIO ===
 class PortfolioOptimizer:
     def optimize(self, risk_level='medium'):
         presets = {
@@ -61,7 +67,7 @@ class PortfolioOptimizer:
         }
         return presets.get(risk_level, presets['medium'])
 
-# === INSTANCES ===
+# === INSTANCIAS ===
 fetcher = BCRADataFetcher()
 predictor = ExchangeRatePredictor()
 alert_system = EconomicAlertSystem()
@@ -75,12 +81,18 @@ current_data = {
     'alerts': []
 }
 
-# === ROUTES ===
+# === FLASK ROUTES ===
 @app.route("/api/predict/dollar/<int:days>")
 def predict_dollar(days):
-    history = fetcher.get_exchange_rate(days=90)
-    predictor.train(history)
-    return jsonify(predictor.predict(days))
+    try:
+        history = fetcher.get_exchange_rate(days=90)
+        print("Histórico de cotizaciones:", history[-3:])
+        predictor.train(history)
+        predictions = predictor.predict(days)
+        return jsonify(predictions)
+    except Exception as e:
+        print("❌ Error en /predict/dollar:", e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/optimize/<risk_level>")
 def optimize_portfolio(risk_level):
@@ -92,9 +104,13 @@ def get_alerts():
 
 @app.route("/api/variables")
 def get_variables():
-    return jsonify(fetcher.get_all_monetary_variables())
+    try:
+        return jsonify(fetcher.get_all_monetary_variables())
+    except Exception as e:
+        print("❌ Error en /variables:", e)
+        return jsonify({"error": str(e)}), 500
 
-# === BACKGROUND DATA REFRESH ===
+# === BACKGROUND UPDATE ===
 def update_data():
     try:
         current_data['official_rate'] = fetcher.get_exchange_rate(days=1)[0]['tipoCotizacion']
@@ -104,8 +120,9 @@ def update_data():
             fetcher.get_debtors_data("30600000000")
         ]
         current_data['alerts'] = alert_system.check_alerts(current_data)
+        print("✅ Datos actualizados correctamente.")
     except Exception as e:
-        print(f"Error actualizando datos: {e}")
+        print("❌ Error actualizando datos:", e)
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(update_data, 'interval', minutes=30)
