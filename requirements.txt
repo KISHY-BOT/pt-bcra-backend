@@ -2,5 +2,7 @@ flask
 requests
 pandas
 numpy
-apscheduler
 certifi
+apscheduler
+backoff
+gunicorn
