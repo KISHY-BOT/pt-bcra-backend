@@ -6,3 +6,4 @@ certifi
 apscheduler
 backoff
 gunicorn
+python-dotenv
