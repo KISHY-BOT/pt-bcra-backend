@@ -7,3 +7,4 @@ apscheduler
 backoff
 gunicorn
 python-dotenv
+flask-cors
