@@ -2,25 +2,25 @@ import os
 import requests
 import pandas as pd
 import numpy as np
-import certifi  # Importación necesaria para certificados
+import certifi
 import backoff
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# SOLUCIÓN: Configurar correctamente el bundle de certificados
+# Configuración robusta de certificados
 ca_bundle = os.getenv('REQUESTS_CA_BUNDLE') or certifi.where()
 os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
 
 app = Flask(__name__)
 
-# Configuración de seguridad para Render
+# Configuración de seguridad
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Accept': 'application/json'
 }
-TIMEOUT = 30  # segundos
+TIMEOUT = 30
 
-# === BCRA API WRAPPER MEJORADO ===
+# === BCRA API WRAPPER ===
 class BCRADataFetcher:
     BASE_URL = "https://api.bcra.gob.ar"
 
@@ -29,20 +29,18 @@ class BCRADataFetcher:
                           max_tries=4,
                           jitter=backoff.full_jitter)
     def _make_request(self, url):
-        # Usar la ruta de certificados configurada
         ssl_path = os.getenv('REQUESTS_CA_BUNDLE')
         try:
             response = requests.get(
                 url,
                 headers=HEADERS,
                 timeout=TIMEOUT,
-                verify=ssl_path  # Verificación SSL configurable
+                verify=ssl_path
             )
             response.raise_for_status()
             return response
         except requests.exceptions.SSLError as e:
             print(f"⚠️ Error SSL: {e}. Reintentando sin verificación...")
-            # Último recurso: deshabilitar verificación SSL
             return requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
 
     def get_exchange_rate(self, currency="USD", days=30):
@@ -66,15 +64,13 @@ class BCRADataFetcher:
         response = self._make_request(url)
         return response.json().get('results', {})
 
-# === SIMPLIFIED ARIMA PREDICTOR ===
+# === PREDICTOR ===
 class ExchangeRatePredictor:
     def train(self, historical_data):
         if not historical_data:
             raise ValueError("No se proporcionaron datos históricos")
 
         df = pd.DataFrame(historical_data)
-
-        # Verificar columnas necesarias
         if 'fecha' not in df.columns or 'tipoCotizacion' not in df.columns:
             raise ValueError("Datos históricos incompletos")
 
@@ -96,12 +92,10 @@ class EconomicAlertSystem:
     def check_alerts(self, data):
         alerts = []
 
-        # Verificar reservas
         reserves = data.get('reserves', 0)
         if reserves < 35000:
             alerts.append(f"Reservas bajas (${reserves}M)")
 
-        # Verificar brecha cambiaria
         blue_rate = data.get('blue_rate', 0)
         official_rate = data.get('official_rate', 0)
 
@@ -110,7 +104,6 @@ class EconomicAlertSystem:
             if gap > 0.15:
                 alerts.append(f"Brecha cambiaria crítica: {gap:.2%}")
 
-        # Verificar deudores
         debtors = data.get('debtors', [])
         for debtor in debtors:
             if isinstance(debtor, dict):
@@ -121,7 +114,7 @@ class EconomicAlertSystem:
 
         return alerts
 
-# === OPTIMIZADOR DE PORTAFOLIO ===
+# === OPTIMIZADOR ===
 class PortfolioOptimizer:
     def optimize(self, risk_level='medium'):
         presets = {
@@ -137,7 +130,6 @@ predictor = ExchangeRatePredictor()
 alert_system = EconomicAlertSystem()
 optimizer = PortfolioOptimizer()
 
-# Datos iniciales (se actualizarán en el primer job)
 current_data = {
     'official_rate': 1280,
     'blue_rate': 1300,
@@ -146,7 +138,7 @@ current_data = {
     'alerts': []
 }
 
-# === FLASK ROUTES ===
+# === RUTAS FLASK ===
 @app.route("/")
 def home():
     return jsonify({
@@ -212,7 +204,6 @@ def get_variables():
         print(f"❌ Error en /variables: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Ruta para verificar variables de entorno (opcional)
 @app.route("/env")
 def env_vars():
     return jsonify({
@@ -220,13 +211,12 @@ def env_vars():
         "PYTHON_VERSION": os.getenv("PYTHON_VERSION")
     })
 
-# === BACKGROUND UPDATE ===
+# === ACTUALIZACIÓN EN SEGUNDO PLANO ===
 def update_data():
     try:
         print("\n" + "="*50)
         print("🔁 Iniciando actualización de datos...")
 
-        # 1. Obtener tipo de cambio oficial
         exchange_data = fetcher.get_exchange_rate(days=1)
         if exchange_data:
             current_data['official_rate'] = exchange_data[0].get('tipoCotizacion', 1280)
@@ -234,7 +224,6 @@ def update_data():
         else:
             print("⚠️ No se pudo obtener el dólar oficial")
 
-        # 2. Obtener reservas (variable ID 1 = Reservas Internacionales)
         reserves_data = fetcher.get_monetary_data(1)
         if reserves_data:
             current_data['reserves'] = reserves_data[0].get('valor', 39000)
@@ -242,13 +231,8 @@ def update_data():
         else:
             print("⚠️ No se pudieron obtener las reservas")
 
-        # 3. Obtener datos de deudores (CUITs de ejemplo)
         current_data['debtors'] = []
-        # CUITs reales para test (reemplazar con los que necesites)
-        company_cuits = [
-            "30500000000",  # Ejemplo: YPF
-            "30600000000"   # Ejemplo: TGN
-        ]
+        company_cuits = ["30500000000", "30600000000"]
 
         for cuit in company_cuits:
             try:
@@ -259,7 +243,6 @@ def update_data():
             except Exception as e:
                 print(f"⚠️ Error obteniendo deudor {cuit}: {str(e)}")
 
-        # 4. Generar alertas
         current_data['alerts'] = alert_system.check_alerts(current_data)
 
         if current_data['alerts']:
@@ -274,12 +257,12 @@ def update_data():
     except Exception as e:
         print(f"❌ Error crítico en actualización: {str(e)}")
 
-# Configurar y ejecutar scheduler (descomentar si usas plan pago)
+# Configurar scheduler
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(update_data, 'interval', minutes=30)
 scheduler.start()
 
-# Ejecutar una actualización al inicio
+# Ejecutar actualización inicial
 print("="*50)
 print("🚀 Iniciando aplicación BCRA Predictor")
 print("="*50)
