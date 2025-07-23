@@ -2,13 +2,9 @@ import os
 import requests
 import pandas as pd
 import numpy as np
-import certifi
 import backoff
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
-
-# SOLUCIÓN: Forzar uso de certificados del sistema
-os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 
 app = Flask(__name__)
 
@@ -28,11 +24,15 @@ class BCRADataFetcher:
                           max_tries=4,
                           jitter=backoff.full_jitter)
     def _make_request(self, url):
+        # Usar la ruta de certificados de la variable de entorno
+        ssl_path = os.getenv('REQUESTS_CA_BUNDLE')
         try:
             response = requests.get(
                 url,
                 headers=HEADERS,
-                timeout=TIMEOUT
+                timeout=TIMEOUT,
+                verify=ssl_path  # Verificación SSL configurable
+
             )
             response.raise_for_status()
             return response
@@ -151,7 +151,9 @@ def home():
             "/api/predict/dollar/<days>": "Predicción dólar (1-30 días)",
             "/api/optimize/<risk_level>": "Portafolio (low/medium/high)",
             "/api/alerts": "Alertas económicas",
-            "/api/variables": "Variables BCRA"
+            "/api/variables": "Variables BCRA",
+            "/env": "[DEBUG] Ver variables de entorno"
+
         }
     })
 
@@ -207,61 +209,14 @@ def get_variables():
         print(f"❌ Error en /variables: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# === BACKGROUND UPDATE ===
-def update_data():
-    try:
-        print("\n" + "="*50)
-        print("🔁 Iniciando actualización de datos...")
-
-        # 1. Obtener tipo de cambio oficial
-        exchange_data = fetcher.get_exchange_rate(days=1)
-        if exchange_data:
-            current_data['official_rate'] = exchange_data[0].get('tipoCotizacion', 1280)
-            print(f"✅ Dólar oficial: ${current_data['official_rate']}")
-        else:
-            print("⚠️ No se pudo obtener el dólar oficial")
-
-        # 2. Obtener reservas (variable ID 1 = Reservas Internacionales)
-        reserves_data = fetcher.get_monetary_data(1)
-        if reserves_data:
-            current_data['reserves'] = reserves_data[0].get('valor', 39000)
-            print(f"✅ Reservas: USD {current_data['reserves']}M")
-        else:
-            print("⚠️ No se pudieron obtener las reservas")
-
-        # 3. Obtener datos de deudores (CUITs de ejemplo)
-        current_data['debtors'] = []
-        # CUITs reales para test (reemplazar con los que necesites)
-        company_cuits = [
-            "30500000000",  # Ejemplo: YPF
-            "30600000000"   # Ejemplo: TGN
-        ]
-
-        for cuit in company_cuits:
-            try:
-                debtor_data = fetcher.get_debtors_data(cuit)
-                if debtor_data:
-                    current_data['debtors'].append(debtor_data)
-                    print(f"✅ Datos de deudor: {cuit}")
-            except Exception as e:
-                print(f"⚠️ Error obteniendo deudor {cuit}: {str(e)}")
-
-        # 4. Generar alertas
-        current_data['alerts'] = alert_system.check_alerts(current_data)
-
-        if current_data['alerts']:
-            print(f"🚨 Alertas activas: {len(current_data['alerts'])}")
-            for alert in current_data['alerts']:
-                print(f"  - {alert}")
-        else:
-            print("✅ Sin alertas activas")
-
-        print("="*50 + "\n")
-
-    except Exception as e:
-        print(f"❌ Error crítico en actualización: {str(e)}")
-
-# Configurar y ejecutar scheduler
+# Ruta para verificar variables de entorno (opcional)
+@app.route("/env")
+def env_vars():
+    return jsonify({
+        "REQUESTS_CA_BUNDLE": os.getenv("REQUESTS_CA_BUNDLE"),
+        "PYTHON_VERSION": os.getenv("PYTHON_VERSION")
+    })
+# Configurar y ejecutar scheduler (descomentar si usas plan pago)
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(update_data, 'interval', minutes=30)
 scheduler.start()
