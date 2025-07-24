@@ -1,3 +1,7 @@
+# Aplicar parche de gevent PRIMERO, antes de cualquier otra importación
+from gevent import monkey
+monkey.patch_all()
+
 import os
 import sys
 import requests
@@ -5,10 +9,9 @@ import pandas as pd
 import numpy as np
 import certifi
 import backoff
+import logging
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
-import logging
-import ssl
 
 # Aumentar límite de recursión
 sys.setrecursionlimit(10000)
@@ -58,7 +61,9 @@ class BCRADataFetcher:
             return response
         except requests.exceptions.SSLError as e:
             logger.error(f"SSL Error: {e}. Retrying without verification...")
-            return requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
+            # Usar sesión temporal sin verificación
+            temp_session = requests.Session()
+            return temp_session.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
         except Exception as e:
             logger.error(f"Request failed: {e}")
             raise
@@ -113,7 +118,7 @@ class EconomicAlertSystem:
 
         reserves = data.get('reserves', 0)
         if reserves < 35000:
-            alerts.append(f"Low reserves (${reserves}M)")
+            alerts.append(f"Reservas bajas (${reserves}M)")
 
         blue_rate = data.get('blue_rate', 0)
         official_rate = data.get('official_rate', 0)
@@ -121,15 +126,15 @@ class EconomicAlertSystem:
         if blue_rate > 0 and official_rate > 0:
             gap = (blue_rate - official_rate) / official_rate
             if gap > 0.15:
-                alerts.append(f"Critical exchange gap: {gap:.2%}")
+                alerts.append(f"Brecha cambiaria crítica: {gap:.2%}")
 
         debtors = data.get('debtors', [])
         for debtor in debtors:
             if isinstance(debtor, dict):
                 situation = debtor.get('situacion', 0)
                 if situation >= 4:
-                    name = debtor.get('denominacion', 'Company')
-                    alerts.append(f"{name} in credit situation {situation}")
+                    name = debtor.get('denominacion', 'Empresa')
+                    alerts.append(f"{name} en situación crediticia {situation}")
 
         return alerts
 
@@ -163,10 +168,10 @@ def home():
     return jsonify({
         "status": "active",
         "endpoints": {
-            "/api/predict/dollar/<days>": "Dollar prediction (1-30 days)",
-            "/api/optimize/<risk_level>": "Portfolio (low/medium/high)",
-            "/api/alerts": "Economic alerts",
-            "/api/variables": "BCRA variables",
+            "/api/predict/dollar/<days>": "Predicción dólar (1-30 días)",
+            "/api/optimize/<risk_level>": "Portafolio (low/medium/high)",
+            "/api/alerts": "Alertas económicas",
+            "/api/variables": "Variables BCRA",
             "/env": "[DEBUG] Environment variables"
         }
     })
