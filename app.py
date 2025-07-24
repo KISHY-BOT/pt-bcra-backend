@@ -20,8 +20,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Aumentar límite de recursión
 sys.setrecursionlimit(10000)
 
-# Configuración robusta de certificados
-ca_bundle = os.getenv('REQUESTS_CA_BUNDLE', certifi.where())
+# Configuración robusta de certificados (ACTUALIZADO)
+ca_bundle = certifi.where()
 os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
 os.environ['SSL_CERT_FILE'] = ca_bundle
 
@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configuración de seguridad
+# Configuración de seguridad (User-Agent actualizado)
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     'Accept': 'application/json'
 }
 TIMEOUT = 30
@@ -59,9 +59,9 @@ class BCRADataFetcher:
             response.raise_for_status()
             return response
         except requests.exceptions.SSLError as e:
-            logger.warning(f"SSL Error: {e}. Retrying without verification...")
-            # Usar sesión temporal sin verificación
-            return requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
+            logger.warning(f"SSL Error: {e}. Using system certificates...")
+            # Intentar con los certificados del sistema
+            return requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=True)
         except Exception as e:
             logger.error(f"Request failed: {e}")
             raise
