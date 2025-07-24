@@ -284,22 +284,16 @@ def update_data():
 scheduler = BackgroundScheduler()
 scheduler.add_job(update_data, 'interval', minutes=30)
 
-# Ejecutar actualización inicial
+# Iniciar scheduler inmediatamente
+if not scheduler.running:
+    scheduler.start()
+    update_data()
+
+# Ejecutar aplicación
 if __name__ == "__main__":
     logger.info("="*50)
     logger.info("🚀 Starting BCRA Predictor App")
     logger.info(f"Using CA bundle: {ca_bundle}")
     logger.info("="*50)
 
-    scheduler.start()
-    update_data()
-
-    # Para desarrollo local
     app.run(host='0.0.0.0', port=5000)
-else:
-    # En producción con Gunicorn, iniciar scheduler después de que el worker esté listo
-    @app.before_first_request
-    def initialize():
-        if not scheduler.running:
-            scheduler.start()
-            update_data()
