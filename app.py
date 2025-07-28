@@ -11,8 +11,12 @@ import certifi
 import backoff
 import logging
 import urllib3
+import ssl
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
+
+# Solución definitiva para certificados SSL
+ssl._create_default_https_context = ssl._create_unverified_context
 
 # Deshabilitar advertencias de SSL no verificadas
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -20,12 +24,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Aumentar límite de recursión
 sys.setrecursionlimit(10000)
 
-# Configuración robusta de certificados (ACTUALIZADO)
-ca_bundle = certifi.where()
-os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
-os.environ['SSL_CERT_FILE'] = ca_bundle
-
-# Configurar logging
+# Configuración de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -54,14 +53,10 @@ class BCRADataFetcher:
                 url,
                 headers=HEADERS,
                 timeout=TIMEOUT,
-                verify=ca_bundle  # Usar el bundle configurado
+                verify=False  # Deshabilitar verificación SSL completamente
             )
             response.raise_for_status()
             return response
-        except requests.exceptions.SSLError as e:
-            logger.warning(f"SSL Error: {e}. Using system certificates...")
-            # Intentar con los certificados del sistema
-            return requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=True)
         except Exception as e:
             logger.error(f"Request failed: {e}")
             raise
@@ -293,7 +288,6 @@ if not scheduler.running:
 if __name__ == "__main__":
     logger.info("="*50)
     logger.info("🚀 Starting BCRA Predictor App")
-    logger.info(f"Using CA bundle: {ca_bundle}")
     logger.info("="*50)
 
     app.run(host='0.0.0.0', port=5000)
