@@ -7,7 +7,6 @@ import sys
 import requests
 import pandas as pd
 import numpy as np
-import certifi
 import backoff
 import logging
 import urllib3
@@ -55,6 +54,20 @@ class BCRADataFetcher:
                 timeout=TIMEOUT,
                 verify=False  # Deshabilitar verificación SSL completamente
             )
+
+            # Verificar si la respuesta es un error 400
+            if response.status_code == 400:
+                # Intentar sin parámetros en la URL para el endpoint de cotizaciones
+                if "Cotizaciones" in url and "limit" in url:
+                    logger.warning("Received 400 error, trying without query parameters")
+                    base_url = url.split("?")[0]
+                    response = requests.get(
+                        base_url,
+                        headers=HEADERS,
+                        timeout=TIMEOUT,
+                        verify=False
+                    )
+
             response.raise_for_status()
             return response
         except Exception as e:
@@ -62,12 +75,14 @@ class BCRADataFetcher:
             raise
 
     def get_exchange_rate(self, currency="USD", days=30):
-        url = f"{self.BASE_URL}/estadisticascambiarias/v1.0/Cotizaciones/{currency}?limit={days}"
+        # Endpoint modificado según documentación BCRA
+        url = f"{self.BASE_URL}/estadisticascambiarias/v1.0/Cotizaciones_{currency}"
         response = self._make_request(url)
         return response.json().get('results', [])
 
     def get_monetary_data(self, variable_id):
-        url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias/{variable_id}"
+        # Endpoint modificado según documentación BCRA
+        url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias_{variable_id}"
         response = self._make_request(url)
         return response.json().get('results', [])
 
@@ -77,7 +92,7 @@ class BCRADataFetcher:
         return response.json().get('results', [])
 
     def get_debtors_data(self, cuit):
-        url = f"{self.BASE_URL}/CentralDeDeudores/v1.0/Deudas/{cuit}"
+        url = f"{self.BASE_URL}/CentralDeDeudores/v1.0/Deudas_{cuit}"
         response = self._make_request(url)
         return response.json().get('results', {})
 
@@ -175,9 +190,12 @@ def predict_dollar(days):
         return jsonify({"error": "Invalid range. Use 1-30 days"}), 400
 
     try:
-        history = fetcher.get_exchange_rate(days=90)
+        history = fetcher.get_exchange_rate()
         if not history:
             return jsonify({"error": "Could not get historical data"}), 500
+
+        # Filtrar solo los últimos 'days' días
+        history = history[:days]
 
         logger.info(f"Received exchange history: {len(history)} records")
         predictor.train(history)
@@ -235,8 +253,10 @@ def update_data():
         logger.info("\n" + "="*50)
         logger.info("Starting data update...")
 
-        exchange_data = fetcher.get_exchange_rate(days=1)
+        # Obtener todos los datos de cotización y luego filtrar
+        exchange_data = fetcher.get_exchange_rate()
         if exchange_data:
+            # Tomar el valor más reciente
             current_data['official_rate'] = exchange_data[0].get('tipoCotizacion', 1280)
             logger.info(f"✅ Official dollar: ${current_data['official_rate']}")
         else:
