@@ -13,6 +13,7 @@ import urllib3
 import ssl
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
 
 # Solución definitiva para certificados SSL
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -54,20 +55,6 @@ class BCRADataFetcher:
                 timeout=TIMEOUT,
                 verify=False  # Deshabilitar verificación SSL completamente
             )
-
-            # Verificar si la respuesta es un error 400
-            if response.status_code == 400:
-                # Intentar sin parámetros en la URL para el endpoint de cotizaciones
-                if "Cotizaciones" in url and "limit" in url:
-                    logger.warning("Received 400 error, trying without query parameters")
-                    base_url = url.split("?")[0]
-                    response = requests.get(
-                        base_url,
-                        headers=HEADERS,
-                        timeout=TIMEOUT,
-                        verify=False
-                    )
-
             response.raise_for_status()
             return response
         except Exception as e:
@@ -75,24 +62,44 @@ class BCRADataFetcher:
             raise
 
     def get_exchange_rate(self, currency="USD", days=30):
-        # Endpoint modificado según documentación BCRA
-        url = f"{self.BASE_URL}/estadisticascambiarias/v1.0/Cotizaciones_{currency}"
+        # Endpoint actualizado según la documentación oficial del BCRA
+        url = f"{self.BASE_URL}/estadisticas/v1.0/Cotizaciones?moneda={currency}&limit={days}"
         response = self._make_request(url)
-        return response.json().get('results', [])
+        data = response.json()
+
+        # Transformar datos al formato esperado
+        transformed = []
+        for item in data.get('results', []):
+            transformed.append({
+                'fecha': item.get('d'),
+                'tipoCotizacion': item.get('v')
+            })
+        return transformed
 
     def get_monetary_data(self, variable_id):
-        # Endpoint modificado según documentación BCRA
-        url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias_{variable_id}"
+        # Endpoint actualizado según la documentación oficial del BCRA
+        url = f"{self.BASE_URL}/estadisticas/v1.0/monetarias/{variable_id}"
         response = self._make_request(url)
-        return response.json().get('results', [])
+        data = response.json()
+
+        # Transformar datos al formato esperado
+        transformed = []
+        for item in data.get('results', []):
+            transformed.append({
+                'fecha': item.get('d'),
+                'valor': item.get('v')
+            })
+        return transformed
 
     def get_all_monetary_variables(self):
-        url = f"{self.BASE_URL}/estadisticas/v3.0/monetarias"
+        # Endpoint actualizado según la documentación oficial del BCRA
+        url = f"{self.BASE_URL}/estadisticas/v1.0/monetarias"
         response = self._make_request(url)
         return response.json().get('results', [])
 
     def get_debtors_data(self, cuit):
-        url = f"{self.BASE_URL}/CentralDeDeudores/v1.0/Deudas_{cuit}"
+        # Endpoint actualizado según la documentación oficial del BCRA
+        url = f"{self.BASE_URL}/CentralDeDeudores/v1.0/Deudas/{cuit}"
         response = self._make_request(url)
         return response.json().get('results', {})
 
@@ -190,12 +197,9 @@ def predict_dollar(days):
         return jsonify({"error": "Invalid range. Use 1-30 days"}), 400
 
     try:
-        history = fetcher.get_exchange_rate()
+        history = fetcher.get_exchange_rate(days=90)
         if not history:
             return jsonify({"error": "Could not get historical data"}), 500
-
-        # Filtrar solo los últimos 'days' días
-        history = history[:days]
 
         logger.info(f"Received exchange history: {len(history)} records")
         predictor.train(history)
@@ -203,7 +207,7 @@ def predict_dollar(days):
         return jsonify({
             "currency": "USD",
             "predictions": predictions,
-            "last_updated": pd.Timestamp.now().isoformat()
+            "last_updated": datetime.now().isoformat()
         })
     except Exception as e:
         logger.error(f"Error in /predict/dollar: {str(e)}")
@@ -253,8 +257,8 @@ def update_data():
         logger.info("\n" + "="*50)
         logger.info("Starting data update...")
 
-        # Obtener todos los datos de cotización y luego filtrar
-        exchange_data = fetcher.get_exchange_rate()
+        # Obtener datos de cotización
+        exchange_data = fetcher.get_exchange_rate(days=1)
         if exchange_data:
             # Tomar el valor más reciente
             current_data['official_rate'] = exchange_data[0].get('tipoCotizacion', 1280)
@@ -262,6 +266,7 @@ def update_data():
         else:
             logger.warning("⚠️ Could not get official dollar")
 
+        # Obtener datos de reservas (variable 1)
         reserves_data = fetcher.get_monetary_data(1)
         if reserves_data:
             current_data['reserves'] = reserves_data[0].get('valor', 39000)
@@ -269,6 +274,7 @@ def update_data():
         else:
             logger.warning("⚠️ Could not get reserves")
 
+        # Obtener datos de deudores
         current_data['debtors'] = []
         company_cuits = ["30500000000", "30600000000"]
 
@@ -281,6 +287,7 @@ def update_data():
             except Exception as e:
                 logger.warning(f"⚠️ Error getting debtor {cuit}: {str(e)}")
 
+        # Verificar alertas
         current_data['alerts'] = alert_system.check_alerts(current_data)
 
         if current_data['alerts']:
